@@ -1,7 +1,7 @@
 from pathlib import Path
 
 import pandas as pd
-
+import numpy as np
 
 # Project paths
 RAW_DIR = Path("data/raw/CICIDS2017_improved")
@@ -203,6 +203,11 @@ def aggregate_directional_features(
     numeric = df[feature_columns].apply(
         pd.to_numeric,
         errors="coerce",
+    )
+
+    numeric = numeric.replace(
+    [np.inf, -np.inf],
+    np.nan,
     )
 
     working = pd.concat(
