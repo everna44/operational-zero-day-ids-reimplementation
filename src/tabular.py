@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 from sklearn.linear_model import LogisticRegression
-
+from sklearn.ensemble import RandomForestClassifier
 
 RANDOM_STATE = 42
 
@@ -113,6 +113,59 @@ def train_logistic_regression(
 
     return model
 
+def train_random_forest(
+    nodes: pd.DataFrame,
+    random_state: int = RANDOM_STATE,
+) -> RandomForestClassifier:
+    """
+    Train a binary Random Forest baseline.
+
+    Training policy:
+    - BENIGN -> 0
+    - SEEN -> 1
+    - OOD is completely excluded from training.
+    """
+    feature_columns = get_feature_columns(nodes)
+
+    train = nodes[
+        (nodes["split"] == "train")
+        & nodes["session_category"].isin(
+            ["BENIGN", "SEEN"]
+        )
+    ].copy()
+
+    x_train = train[
+        feature_columns
+    ].to_numpy(
+        dtype=np.float32,
+        copy=True,
+    )
+
+    y_train = (
+        train["session_category"]
+        .map({
+            "BENIGN": 0,
+            "SEEN": 1,
+        })
+        .to_numpy(
+            dtype=np.int64,
+            copy=True,
+        )
+    )
+
+    model = RandomForestClassifier(
+        n_estimators=200,
+        class_weight="balanced",
+        random_state=random_state,
+        n_jobs=-1,
+    )
+
+    model.fit(
+        x_train,
+        y_train,
+    )
+
+    return model
 
 def predict_malicious_score(
     model: LogisticRegression,
