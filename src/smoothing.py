@@ -34,11 +34,12 @@ def apply_pre_smoothing(
 
         X' = (1 - gamma) X + gamma D^{-1} A X
 
-    The stored KNN edge list is undirected and contains each
-    pair once, so edges are symmetrized internally before
-    neighborhood aggregation.
+    Global node_id values do not need to be contiguous.
+    Edge endpoints are mapped to local tensor positions
+    internally.
 
-    Edge weights are cosine similarities.
+    Stored KNN edges are undirected pairs represented once,
+    so both message-passing directions are added internally.
     """
     if not 0.0 <= gamma <= 1.0:
         raise ValueError(
@@ -79,27 +80,14 @@ def apply_pre_smoothing(
             "node_id values must be unique."
         )
 
-    num_nodes = len(nodes)
-
-    expected_node_ids = np.arange(
-        num_nodes,
-        dtype=np.int64,
-    )
-
-    actual_node_ids = nodes[
-        "node_id"
-    ].to_numpy(
-        dtype=np.int64,
-        copy=False,
-    )
-
-    if not np.array_equal(
-        actual_node_ids,
-        expected_node_ids,
-    ):
+    if nodes.empty:
         raise ValueError(
-            "node_id values must be contiguous "
-            "from 0 to N-1."
+            "Node table must not be empty."
+        )
+
+    if edges.empty:
+        raise ValueError(
+            "Edge table must not be empty."
         )
 
     feature_columns = get_feature_columns(
@@ -125,14 +113,21 @@ def apply_pre_smoothing(
             "Feature matrix contains NaN or infinity."
         )
 
-    src = edges[
+    node_ids = nodes[
+        "node_id"
+    ].to_numpy(
+        dtype=np.int64,
+        copy=True,
+    )
+
+    src_global = edges[
         "src_node_id"
     ].to_numpy(
         dtype=np.int64,
         copy=True,
     )
 
-    dst = edges[
+    dst_global = edges[
         "dst_node_id"
     ].to_numpy(
         dtype=np.int64,
@@ -151,15 +146,28 @@ def apply_pre_smoothing(
             "Edge weights contain NaN or infinity."
         )
 
+    node_index = pd.Index(
+        node_ids
+    )
+
+    src = node_index.get_indexer(
+        src_global
+    )
+
+    dst = node_index.get_indexer(
+        dst_global
+    )
+
     if (
-        src.min() < 0
-        or dst.min() < 0
-        or src.max() >= num_nodes
-        or dst.max() >= num_nodes
+        (src < 0).any()
+        or (dst < 0).any()
     ):
         raise ValueError(
-            "Edge list contains invalid node IDs."
+            "Edge list contains node IDs "
+            "that are not present in nodes."
         )
+
+    num_nodes = len(nodes)
 
     if device is None:
         device = (
@@ -173,30 +181,38 @@ def apply_pre_smoothing(
     ).to(device)
 
     src_tensor = torch.from_numpy(
-        src
+        src.astype(
+            np.int64,
+            copy=False,
+        )
     ).to(device)
 
     dst_tensor = torch.from_numpy(
-        dst
+        dst.astype(
+            np.int64,
+            copy=False,
+        )
     ).to(device)
 
     weight_tensor = torch.from_numpy(
         weight
     ).to(device)
 
-    # Stored edges are undirected pairs represented once.
-    # Add both directions for message aggregation.
-    message_src = torch.cat(
-        [src_tensor, dst_tensor]
-    )
+    # Stored edges contain each undirected pair once.
+    message_src = torch.cat([
+        src_tensor,
+        dst_tensor,
+    ])
 
-    message_dst = torch.cat(
-        [dst_tensor, src_tensor]
-    )
+    message_dst = torch.cat([
+        dst_tensor,
+        src_tensor,
+    ])
 
-    message_weight = torch.cat(
-        [weight_tensor, weight_tensor]
-    )
+    message_weight = torch.cat([
+        weight_tensor,
+        weight_tensor,
+    ])
 
     neighbor_sum = torch.zeros_like(
         x
@@ -296,6 +312,105 @@ def smooth_and_save(
 
     print(
         f"Saved {len(smoothed):,} nodes "
+        f"to {output_path}"
+    )
+
+    return output_path
+
+
+def smooth_split_aware_and_save(
+    window_name: str,
+    gamma: float = DEFAULT_GAMMA,
+    device: str | None = None,
+) -> Path:
+    """
+    Apply pre-smoothing independently inside
+    Train / Validation / Test.
+
+    Each split uses its independently reconstructed
+    KNN graph, preventing cross-split feature mixing.
+    """
+    if window_name not in {
+        "1m",
+        "5m",
+    }:
+        raise ValueError(
+            "window_name must be '1m' or '5m'."
+        )
+
+    node_path = (
+        PROCESSED_DIR
+        / f"nodes_{window_name}_standardized.csv"
+    )
+
+    nodes = pd.read_csv(
+        node_path
+    )
+
+    feature_columns = get_feature_columns(
+        nodes
+    )
+
+    result = nodes.copy()
+
+    for split_name in [
+        "train",
+        "validation",
+        "test",
+    ]:
+        subset = nodes[
+            nodes["split"] == split_name
+        ].copy()
+
+        edge_path = (
+            PROCESSED_DIR
+            / (
+                f"knn_edges_"
+                f"{window_name}_"
+                f"{split_name}.csv"
+            )
+        )
+
+        edges = pd.read_csv(
+            edge_path
+        )
+
+        smoothed_subset = apply_pre_smoothing(
+            subset,
+            edges,
+            gamma=gamma,
+            device=device,
+        )
+
+        result.loc[
+            subset.index,
+            feature_columns,
+        ] = smoothed_subset[
+            feature_columns
+        ].to_numpy()
+
+        print(
+            f"{window_name} | "
+            f"{split_name} | "
+            f"nodes={len(subset):,} | "
+            f"edges={len(edges):,}"
+        )
+
+    output_path = (
+        PROCESSED_DIR
+        / (
+            f"nodes_{window_name}_"
+            f"smoothed_split_g{gamma}.csv"
+        )
+    )
+
+    result.to_csv(
+        output_path,
+        index=False,
+    )
+
+    print(
+        f"Saved {len(result):,} nodes "
         f"to {output_path}"
     )
 
