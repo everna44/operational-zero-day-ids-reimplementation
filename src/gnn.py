@@ -4,7 +4,12 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
-from torch_geometric.nn import GCNConv
+from torch_geometric.nn import (
+    GATConv,
+    GCNConv,
+    GINConv,
+    SAGEConv,
+)
 
 
 RANDOM_STATE = 42
@@ -95,6 +100,230 @@ class GCNDetector(nn.Module):
 
         return logits
 
+
+class GINDetector(nn.Module):
+    def __init__(
+        self,
+        input_dim: int,
+        hidden_dim: int = HIDDEN_DIM,
+        dropout: float = DROPOUT,
+    ) -> None:
+        super().__init__()
+
+        mlp1 = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+        )
+
+        mlp2 = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+        )
+
+        self.conv1 = GINConv(mlp1)
+        self.conv2 = GINConv(mlp2)
+
+        self.classifier = nn.Linear(
+            hidden_dim,
+            1,
+        )
+
+        self.dropout = nn.Dropout(
+            dropout
+        )
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        edge_index: torch.Tensor,
+        edge_weight: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        x = self.conv1(
+            x,
+            edge_index,
+        )
+
+        x = torch.relu(x)
+        x = self.dropout(x)
+
+        x = self.conv2(
+            x,
+            edge_index,
+        )
+
+        x = torch.relu(x)
+        x = self.dropout(x)
+
+        return self.classifier(
+            x
+        ).squeeze(-1)
+
+
+class GraphSAGEDetector(nn.Module):
+    def __init__(
+        self,
+        input_dim: int,
+        hidden_dim: int = HIDDEN_DIM,
+        dropout: float = DROPOUT,
+    ) -> None:
+        super().__init__()
+
+        self.conv1 = SAGEConv(
+            input_dim,
+            hidden_dim,
+        )
+
+        self.conv2 = SAGEConv(
+            hidden_dim,
+            hidden_dim,
+        )
+
+        self.classifier = nn.Linear(
+            hidden_dim,
+            1,
+        )
+
+        self.dropout = nn.Dropout(
+            dropout
+        )
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        edge_index: torch.Tensor,
+        edge_weight: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        x = self.conv1(
+            x,
+            edge_index,
+        )
+
+        x = torch.relu(x)
+        x = self.dropout(x)
+
+        x = self.conv2(
+            x,
+            edge_index,
+        )
+
+        x = torch.relu(x)
+        x = self.dropout(x)
+
+        return self.classifier(
+            x
+        ).squeeze(-1)
+
+
+class GATDetector(nn.Module):
+    def __init__(
+        self,
+        input_dim: int,
+        hidden_dim: int = HIDDEN_DIM,
+        dropout: float = DROPOUT,
+        heads: int = 4,
+    ) -> None:
+        super().__init__()
+
+        if hidden_dim % heads != 0:
+            raise ValueError(
+                "hidden_dim must be divisible by heads."
+            )
+
+        head_dim = hidden_dim // heads
+
+        self.conv1 = GATConv(
+            input_dim,
+            head_dim,
+            heads=heads,
+            dropout=dropout,
+        )
+
+        self.conv2 = GATConv(
+            hidden_dim,
+            head_dim,
+            heads=heads,
+            dropout=dropout,
+        )
+
+        self.classifier = nn.Linear(
+            hidden_dim,
+            1,
+        )
+
+        self.dropout = nn.Dropout(
+            dropout
+        )
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        edge_index: torch.Tensor,
+        edge_weight: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        x = self.conv1(
+            x,
+            edge_index,
+        )
+
+        x = torch.relu(x)
+        x = self.dropout(x)
+
+        x = self.conv2(
+            x,
+            edge_index,
+        )
+
+        x = torch.relu(x)
+        x = self.dropout(x)
+
+        return self.classifier(
+            x
+        ).squeeze(-1)    
+
+
+def build_gnn_model(
+    backbone: str,
+    input_dim: int,
+    hidden_dim: int = HIDDEN_DIM,
+    dropout: float = DROPOUT,
+) -> nn.Module:
+    backbone = backbone.lower()
+
+    if backbone == "gcn":
+        return GCNDetector(
+            input_dim=input_dim,
+            hidden_dim=hidden_dim,
+            dropout=dropout,
+        )
+
+    if backbone == "gin":
+        return GINDetector(
+            input_dim=input_dim,
+            hidden_dim=hidden_dim,
+            dropout=dropout,
+        )
+
+    if backbone == "sage":
+        return GraphSAGEDetector(
+            input_dim=input_dim,
+            hidden_dim=hidden_dim,
+            dropout=dropout,
+        )
+
+    if backbone == "gat":
+        return GATDetector(
+            input_dim=input_dim,
+            hidden_dim=hidden_dim,
+            dropout=dropout,
+            heads=4,
+        )
+
+    raise ValueError(
+        "backbone must be one of: "
+        "'gcn', 'gin', 'sage', 'gat'."
+    )
 
 def prepare_graph_data(
     nodes: pd.DataFrame,
@@ -267,44 +496,38 @@ def prepare_graph_data(
     )
 
 
-def train_gcn(
+def train_gnn(
     nodes: pd.DataFrame,
     edges: pd.DataFrame,
+    backbone: str = "gcn",
     epochs: int = EPOCHS,
     hidden_dim: int = HIDDEN_DIM,
     dropout: float = DROPOUT,
     learning_rate: float = LEARNING_RATE,
     seed: int = RANDOM_STATE,
     device: str = "cuda",
-) -> GCNDetector:
+) -> nn.Module:
     """
-    Train a GCN on one split-specific graph.
+    Train one GNN backbone on a split-specific graph.
 
     Training labels:
         BENIGN -> 0
         SEEN   -> 1
 
     OOD must not be present in the training split.
-    Class imbalance is handled using BCE pos_weight.
     """
     set_seed(seed)
 
-    if (
-        nodes["session_category"]
-        .eq("OOD")
-        .any()
-    ):
+    if nodes["session_category"].eq("OOD").any():
         raise ValueError(
             "OOD samples must not be present "
-            "in GCN training data."
+            "in GNN training data."
         )
 
-    x, y, edge_index, edge_weight = (
-        prepare_graph_data(
-            nodes,
-            edges,
-            device=device,
-        )
+    x, y, edge_index, edge_weight = prepare_graph_data(
+        nodes,
+        edges,
+        device=device,
     )
 
     num_positive = int(
@@ -315,16 +538,14 @@ def train_gcn(
         (y == 0).sum().item()
     )
 
-    if (
-        num_positive == 0
-        or num_negative == 0
-    ):
+    if num_positive == 0 or num_negative == 0:
         raise ValueError(
             "Training data must contain both "
             "BENIGN and SEEN classes."
         )
 
-    model = GCNDetector(
+    model = build_gnn_model(
+        backbone=backbone,
         input_dim=x.shape[1],
         hidden_dim=hidden_dim,
         dropout=dropout,
@@ -346,6 +567,7 @@ def train_gcn(
     )
 
     print(
+        f"Backbone: {backbone.upper()} | "
         f"Device: {device} | "
         f"Nodes: {len(nodes):,} | "
         f"Edges: {len(edges):,} | "
@@ -354,10 +576,7 @@ def train_gcn(
         f"pos_weight: {pos_weight.item():.3f}"
     )
 
-    for epoch in range(
-        1,
-        epochs + 1,
-    ):
+    for epoch in range(1, epochs + 1):
         model.train()
 
         optimizer.zero_grad()
@@ -390,8 +609,8 @@ def train_gcn(
     return model
 
 
-def predict_gcn_score(
-    model: GCNDetector,
+def predict_gnn_score(
+    model: nn.Module,
     nodes: pd.DataFrame,
     edges: pd.DataFrame,
     device: str = "cuda",
@@ -400,12 +619,10 @@ def predict_gcn_score(
     Return P(malicious) for every node in one
     split-specific graph.
     """
-    x, _, edge_index, edge_weight = (
-        prepare_graph_data(
-            nodes,
-            edges,
-            device=device,
-        )
+    x, _, edge_index, edge_weight = prepare_graph_data(
+        nodes,
+        edges,
+        device=device,
     )
 
     model.eval()
@@ -421,8 +638,47 @@ def predict_gcn_score(
             logits
         )
 
-    return (
-        scores
-        .cpu()
-        .numpy()
+    return scores.cpu().numpy()
+
+
+def train_gcn(
+    nodes: pd.DataFrame,
+    edges: pd.DataFrame,
+    epochs: int = EPOCHS,
+    hidden_dim: int = HIDDEN_DIM,
+    dropout: float = DROPOUT,
+    learning_rate: float = LEARNING_RATE,
+    seed: int = RANDOM_STATE,
+    device: str = "cuda",
+) -> nn.Module:
+    """
+    Backward-compatible GCN training wrapper.
+    """
+    return train_gnn(
+        nodes=nodes,
+        edges=edges,
+        backbone="gcn",
+        epochs=epochs,
+        hidden_dim=hidden_dim,
+        dropout=dropout,
+        learning_rate=learning_rate,
+        seed=seed,
+        device=device,
+    )
+
+
+def predict_gcn_score(
+    model: nn.Module,
+    nodes: pd.DataFrame,
+    edges: pd.DataFrame,
+    device: str = "cuda",
+) -> np.ndarray:
+    """
+    Backward-compatible GCN prediction wrapper.
+    """
+    return predict_gnn_score(
+        model=model,
+        nodes=nodes,
+        edges=edges,
+        device=device,
     )
