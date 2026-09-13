@@ -1,0 +1,22 @@
+cff-version: 1.2.0
+message: "If you use this repository, please cite the original paper."
+title: "Operationally Constrained Zero-Day IDS - Clean Reimplementation"
+type: software
+authors:
+  - family-names: "Ha"
+    given-names: "Yuseong"
+repository-code: "https://github.com/everna44/operational-zero-day-ids-reimplementation"
+license: MIT
+date-released: 2026-09-13
+preferred-citation:
+  type: article
+  authors:
+    - family-names: "Ha"
+      given-names: "Yuseong"
+    - family-names: "Kim"
+      given-names: "Keecheon"
+  title: "Operationally Constrained Zero-Day Intrusion Detection with Target-FPR Calibration and Similarity Graph Construction"
+  journal: "Applied Sciences"
+  year: 2026
+  volume: 16
+  doi: "10.3390/app16052284"
