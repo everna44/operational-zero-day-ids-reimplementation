@@ -274,6 +274,21 @@ The full experiment contains:
 
 The GNN experiment contains **240 evaluated rows**, while the tabular experiment contains **90 evaluated rows**.
 
+### Key Visual Results
+
+#### Detection–Robustness Trade-off
+
+![Detection–Robustness Trade-off](figures/detection_robustness_tradeoff.png)
+
+The reconstructed experiments show a clear trade-off between zero-day detection quality and operational stability. Tabular baselines remain highly competitive in OOD F1, while GNN-ours consistently reduces p95 tail-risk relative to GNN-base across all six evaluated settings.
+
+#### Tail-Risk Reduction
+
+![Tail-Risk Reduction](figures/tail_risk_reduction.png)
+
+Across all six combinations of temporal window and target FPR, GNN-ours reduces the p95 FPR violation ratio relative to GNN-base. However, the OOD F1 improvements reported in the original publication are not consistently reproduced in this clean reimplementation.
+
+
 ### Family-Level Comparison
 
 | Window | alpha | Tabular OOD F1 | GNN-base OOD F1 | GNN-ours OOD F1 | Tabular p95 | Base p95 | Ours p95 |
@@ -331,6 +346,11 @@ This distinction is important when comparing the reconstructed operational metri
 .
 ├── README.md
 ├── requirements.txt
+├── figures/
+│   ├── detection_robustness_tradeoff.png
+│   ├── detection_robustness_tradeoff.pdf
+│   ├── tail_risk_reduction.png
+│   └── tail_risk_reduction.pdf
 ├── results/
 │   ├── family_comparison.csv
 │   ├── family_comparison_wide.csv
@@ -359,4 +379,5 @@ This distinction is important when comparing the reconstructed operational metri
     ├── run_gnn_experiment.py
     ├── run_gnn_batch.py
     ├── summarize_gnn_results.py
-    └── build_family_comparison.py
+    ├── build_family_comparison.py
+    └── plot_results.py
