@@ -381,3 +381,57 @@ This distinction is important when comparing the reconstructed operational metri
     ├── summarize_gnn_results.py
     ├── build_family_comparison.py
     └── plot_results.py
+```
+
+## Environment
+
+Tested with:
+
+- Python 3.11
+- NumPy 2.4.6
+- pandas 3.0.5
+- scikit-learn 1.9.1
+- PyTorch 2.11.0 with CUDA 12.8
+- PyTorch Geometric 2.8.0
+
+Experiments were executed on an NVIDIA RTX 3070 GPU.
+
+## Running the Experiments
+
+Processed datasets are intentionally excluded from Git.
+
+GNN experiments:
+
+```powershell
+python -m src.run_gnn_batch `
+  --windows 1m 5m `
+  --methods base ours `
+  --backbones gcn gin sage gat `
+  --seeds 0 1 2 3 4 `
+  --epochs 80 `
+  --device cuda `
+  --output results/gnn_results.csv
+```
+
+Tabular experiments:
+
+```powershell
+python -m src.run_tabular_batch `
+  --windows 1m 5m `
+  --models lr rf mlp `
+  --seeds 0 1 2 3 4 `
+  --epochs 80 `
+  --device cuda `
+  --output results/tabular_results.csv
+```
+
+The batch runners support resuming completed settings.
+
+## Citation
+
+If you use or reference the methodology, please cite the original paper:
+
+> Y. Ha and K. Kim,<br>
+> "Operationally Constrained Zero-Day Intrusion Detection with Target-FPR Calibration and Similarity Graph Construction,"<br>
+> *Applied Sciences*, vol. 16, 2026, Art. no. 2284.<br>
+> https://doi.org/10.3390/app16052284
